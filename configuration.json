@@ -1,0 +1,62 @@
+[
+    {
+        "key": "token",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "type": "password",
+            "label": "token",
+            "required": true
+        }
+    },
+    {
+        "key": "BaseUrl",
+        "type": "input",
+        "defaultValue": "",
+        "templateOptions": {
+            "label": "BaseUrl",
+            "description": "The URL to the API.",
+            "required": true
+        }
+    },
+    {
+        "key": "IsDebug",
+        "type": "checkbox",
+        "defaultValue": true,
+        "templateOptions": {
+            "label": "Toggle debug logging",
+            "description": "When toggled, debug logging will be displayed",
+            "required": false
+        }
+    },
+    {
+        "key": "role.administrator",
+        "type": "input",
+        "defaultValue": "Administrator,Admin",
+        "templateOptions": {
+            "label": "Role Administrator",
+            "description": "Comma seperated Title.Code(s) to map the Role",
+            "required": true
+        }
+    },
+    {
+        "key": "role.developer",
+        "type": "input",
+        "defaultValue": "Ontwikkelaar,Developer",
+        "templateOptions": {
+            "label": "Role Developer",
+            "description": "Comma seperated Title.Code(s) to map the Role",
+            "required": true
+        }
+    },
+    {
+        "key": "role.opsapps",
+        "type": "input",
+        "defaultValue": "Devops,Security",
+        "templateOptions": {
+            "label": "Role Ops-Apps",
+            "description": "Comma seperated Title.code(s) to map the Role",
+            "required": true
+        }
+    }
+]
