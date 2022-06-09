@@ -9,17 +9,6 @@ $p = $person | ConvertFrom-Json
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-# Account mapping
-$account = [PSCustomObject]@{
-    UserName = $p.Accounts.MicrosoftActiveDirectory.mail
-    Name     = $p.DisplayName
-    IsActive = $false
-    Email    = $p.Accounts.MicrosoftActiveDirectory.mail
-    Role     = $p.PrimaryContract.Title.code  # This value is used to map title to a Outsystems Role, Which is required for creating a account
-    Password = 'Welcome01'
-}
-
-
 # Enable TLS1.2
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
@@ -30,7 +19,45 @@ switch ($($config.IsDebug)) {
 }
 
 # Set to true if accounts in the target system must be updated
-$updatePerson = $false
+$updateAccount = $true
+
+#region helper functions
+function Get-ComplexRandomPassword{
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory=$true)]
+        $Length,
+        [Parameter(Mandatory=$true)]
+        $NonAlphaChars
+    )
+    
+    $password = [System.Web.Security.Membership]::GeneratePassword($Length, $NonAlphaChars);
+    
+    return $password;
+}
+#endregion helper functions
+
+# Account mapping
+$account = [PSCustomObject]@{
+    UserName = $p.Accounts.MicrosoftAzureADVCZC.UserPrincipalName
+    Name     = $p.Accounts.MicrosoftAzureADVCZC.DisplayName # $p.DisplayName
+    IsActive = $false
+    Email    = $p.Accounts.MicrosoftAzureAD.mail
+    Role     = "$($p.PrimaryContract.Title.Code)-$($p.PrimaryContract.Department.ExternalId)"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
+    Password = Get-ComplexRandomPassword -Length 16 -NonAlphaChars 5 # Only required when Azure Authentication is not enabled in Outsystems
+}
+
+# Troubleshooting
+# $account = [PSCustomObject]@{
+#     UserName = "TestHelloID@enyoi.onmicrosoft.com"
+#     Name     = "Test HelloID"
+#     IsActive = $false
+#     Email    = "TestHelloID@enyoi.onmicrosoft.com"
+#     Role     = "Administrator"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
+#     Password = Get-ComplexRandomPassword -Length 16 -NonAlphaChars 5 # Password is required, but not used, since Azure authentication is set up
+# }
+$dryRun = $false
+
 
 #region functions
 function Resolve-HTTPError {
@@ -92,7 +119,7 @@ function Invoke-CalculateDesiredRole {
     )
     try {
         foreach ($role in $ScriptConfig.role.PSObject.Properties) {
-            if ($Role -in ($mappedRole.value -split ',' )) {
+            if ($mappedRole -in ($role.Value -split ',' )) {
                 $splatWebRequest = @{
                     Uri     = "$($ScriptConfig.BaseUrl)/roles"
                     Headers = $headers
@@ -107,14 +134,14 @@ function Invoke-CalculateDesiredRole {
             throw "Unable to find a Role with the mapping specified in the configuration, Function [$($mappedRole)] is not specfied"
         }
         $auditLogs.Add([PSCustomObject]@{
-                Message = "Role [$($roleFound.name)] will be added to Outsystems Account"
+                Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
             })
-        Write-Output $roleFound.key
+        Write-Output $roleFound
     } catch {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
-#endregion
+#endregion functions
 
 # Begin
 try {
@@ -134,7 +161,7 @@ try {
 
     if (-not($responseUser)) {
         $action = 'Create'
-    } elseif ($updatePerson -eq $true) {
+    } elseif ($updateAccount -eq $true) {
         $action = 'Update-Correlate'
     } else {
         $action = 'Correlate'
@@ -153,8 +180,9 @@ try {
             'Create' {
                 Write-Verbose 'Creating OutSystems account'
                 if ($account.Role) {
-                    $guid = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
-                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $guid }
+                    $roleObject = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
+                    Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"    
+                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
                     $account.psobject.Properties.Remove("Role")
                 }
 
@@ -179,7 +207,7 @@ try {
                     $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
                 }
 
-                # Only required when Azure Authentication is not enabled in Outsystems
+                # # Only required when Azure Authentication is not enabled in Outsystems
                 Write-Verbose 'Set Password OutSystems account'
                 $splatWebRequest = @{
                     Uri     = "$($config.BaseUrl)/users/$accountReference/setpassword"
@@ -197,9 +225,9 @@ try {
                     throw "The user account [$($responseUser.Username) exists in Outsystem, but does not have a unique identifier [Key]"
                 }
                 if ($account.Role) {
-                    $guid = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
-                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $guid }
-                    $account.psobject.Properties.Remove("Role")
+                    $roleObject = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
+                    Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"
+                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
                 }
                 $accountReference = $responseUser.key
                 $splatWebRequest = @{
@@ -223,7 +251,8 @@ try {
         }
         $success = $true
         $auditLogs.Add([PSCustomObject]@{
-                Message = "$action account was successful. AccountReference is: [$accountReference]"
+                Action  = "CreateAccount"
+                Message = "$action account was successful. Username is: [$($account.UserName)]. AccountReference is: [$accountReference]"
                 IsError = $false
             })
     }
