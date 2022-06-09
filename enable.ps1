@@ -19,6 +19,10 @@ switch ($($config.IsDebug)) {
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
 
+# Troubleshooting
+# $aRef = "12345678-bf9b-4e2f-9cbc-abcdefghij"
+# $dryRun = $false
+
 #region functions
 function Resolve-HTTPError {
     [CmdletBinding()]
@@ -90,7 +94,8 @@ try {
         $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
         $success = $true
         $auditLogs.Add([PSCustomObject]@{
-                Message = 'Enable account was successful'
+                Action  = "EnableAccount"
+                Message = "Enable account was successful for account with accountReference: [$aRef]"
                 IsError = $false
             })
     }
@@ -99,13 +104,20 @@ try {
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        $errorObj = Resolve-HTTPError -ErrorObject $ex
-        $errorMessage = "Could not enable OutSystems account. Error: $($errorObj.ErrorMessage)"
+        # $errorObj = Resolve-HTTPError -ErrorObject $ex
+        # $errorMessage = "Could not enable OutSystems account with accountReference: [$($aRef)]. Error: $($errorObj.ErrorMessage)"
+        
+        $errorObjectConverted = $_ | ConvertFrom-Json
+        $errorMessage = "Could not enable OutSystems account with accountReference: [$($aRef)]. Error: $($errorObjectConverted.Errors)"
     } else {
-        $errorMessage = "Could not enable OutSystems account. Error: $($ex.Exception.Message)"
+        $errorMessage = "Could not enable OutSystems account with accountReference: [$($aRef)]. Error: $($ex.Exception.Message)"
     }
-    Write-Verbose $errorMessage
+
+    $verboseErrorMessage = "Could not enable OutSystems account with accountReference: [$($aRef)]. Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    Write-Verbose $verboseErrorMessage
+
     $auditLogs.Add([PSCustomObject]@{
+            Action  = "EnableAccount"
             Message = $errorMessage
             IsError = $true
         })

@@ -36,7 +36,7 @@ $previousAccount = [PSCustomObject]@{
 }
 
 # Troubleshooting
-# $aRef = "a92d296b-bf9b-4e2f-9cbc-15c6f9d063d3"
+# $aRef = "12345678-bf9b-4e2f-9cbc-abcdefghij"
 # $account = [PSCustomObject]@{
 #     UserName = "TestHelloID@enyoi.onmicrosoft.com"
 #     Name     = "Test HelloID"
