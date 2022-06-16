@@ -4,7 +4,7 @@
 # Version: 1.0.0
 #####################################################
 # Initialize default values
-$config = $configuration | ConvertFrom-Json
+$c = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
@@ -13,7 +13,7 @@ $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 # Set debug logging
-switch ($($config.IsDebug)) {
+switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
@@ -22,12 +22,12 @@ switch ($($config.IsDebug)) {
 $updateAccount = $true
 
 #region helper functions
-function Get-ComplexRandomPassword{
+function Get-ComplexRandomPassword {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $Length,
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
         $NonAlphaChars
     )
     
@@ -39,12 +39,11 @@ function Get-ComplexRandomPassword{
 
 # Account mapping
 $account = [PSCustomObject]@{
-    UserName = $p.Accounts.MicrosoftAzureADVCZC.UserPrincipalName
-    Name     = $p.Accounts.MicrosoftAzureADVCZC.DisplayName # $p.DisplayName
+    UserName = $p.Accounts.MicrosoftActiveDirectory.UserPrincipalName
+    Name     = $p.Accounts.MicrosoftActiveDirectory.DisplayName # $p.DisplayName
     IsActive = $false
-    Email    = $p.Accounts.MicrosoftAzureAD.mail
-    Role     = "$($p.PrimaryContract.Title.Code)-$($p.PrimaryContract.Department.ExternalId)"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
-    Password = Get-ComplexRandomPassword -Length 16 -NonAlphaChars 5 # Only required when Azure Authentication is not enabled in Outsystems
+    Email    = $p.Accounts.MicrosoftActiveDirectory.mail
+    # Password = Get-ComplexRandomPassword -Length 16 -NonAlphaChars 5 # Only required when Azure Authentication is not enabled in Outsystems
 }
 
 # Troubleshooting
@@ -53,10 +52,9 @@ $account = [PSCustomObject]@{
 #     Name     = "Test HelloID"
 #     IsActive = $false
 #     Email    = "TestHelloID@enyoi.onmicrosoft.com"
-#     Role     = "Administrator"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
 #     Password = Get-ComplexRandomPassword -Length 16 -NonAlphaChars 5 # Password is required, but not used, since Azure authentication is set up
 # }
-$dryRun = $false
+# $dryRun = $false
 
 
 #region functions
@@ -78,7 +76,8 @@ function Resolve-HTTPError {
         }
         if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') {
             $httpErrorObj.ErrorMessage = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             $httpErrorObj.ErrorMessage = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
         }
         Write-Output $httpErrorObj
@@ -99,45 +98,8 @@ function New-AuthorizationHeaders {
         $headers.Add('Accept', 'application/json')
         $headers.Add('Content-Type', 'application/json')
         Write-Output $headers
-    } catch {
-        $PSCmdlet.ThrowTerminatingError($_)
     }
-}
-
-function Invoke-CalculateDesiredRole {
-    <#
-    .DESCRIPTION
-        Finds the role which mapped in the configuration and performs a lookup in Outsystems to retrieve the GUID/Key
-    #>
-    [CmdletBinding()]
-    param (
-        [parameter(Mandatory)]
-        $ScriptConfig,
-
-        [parameter()]
-        $MappedRole
-    )
-    try {
-        foreach ($role in $ScriptConfig.role.PSObject.Properties) {
-            if ($mappedRole -in ($role.Value -split ',' )) {
-                $splatWebRequest = @{
-                    Uri     = "$($ScriptConfig.BaseUrl)/roles"
-                    Headers = $headers
-                    Method  = 'GET'
-                }
-                $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
-                $roleFound = $roleList.Where( { $_.name -eq $role.name })
-                break
-            }
-        }
-        if ($null -eq $roleFound) {
-            throw "Unable to find a Role with the mapping specified in the configuration, Function [$($mappedRole)] is not specfied"
-        }
-        $auditLogs.Add([PSCustomObject]@{
-                Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
-            })
-        Write-Output $roleFound
-    } catch {
+    catch {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
@@ -146,24 +108,40 @@ function Invoke-CalculateDesiredRole {
 # Begin
 try {
     # Verify if a user must be either [created], [updated and correlated] or just [correlated]
-    $headers = New-AuthorizationHeaders -AccessToken $config.Token
+    $headers = New-AuthorizationHeaders -AccessToken $c.Token
 
     Write-Verbose 'Retrieve Account list from OutSystems'
     $splatWebRequest = @{
-        Uri     = "$($config.BaseUrl)/users?IncludeInactive=true"
+        Uri     = "$($c.BaseUrl)/users?IncludeInactive=true"
         Headers = $headers
         Method  = 'GET'
     }
     $userList = Invoke-RestMethod @splatWebRequest -Verbose:$false
 
     Write-Verbose "Account lookup based on UserName [$($account.UserName)]"
-    $responseUser = $userList | Where-Object { $_.Username -eq $account.UserName }
+    $CurrentUser = $userList | Where-Object { $_.Username -eq $account.UserName }
 
-    if (-not($responseUser)) {
+    if (-not($CurrentUser)) {
         $action = 'Create'
-    } elseif ($updateAccount -eq $true) {
+    }
+    elseif ($updateAccount -eq $true) {
         $action = 'Update-Correlate'
-    } else {
+
+
+        # Verify if the account must be updated
+        $splatCompareProperties = @{
+            ReferenceObject  = @($CurrentUser.PSObject.Properties)
+            DifferenceObject = @($account.PSObject.Properties)
+        }
+        $propertiesChanged = (Compare-Object @splatCompareProperties -PassThru).Where( { $_.SideIndicator -eq '=>' })
+        if ($propertiesChanged) {
+            Write-Verbose "Account property(s) required to update: [$($propertiesChanged.name -join ",")]"
+            $updateAction = 'Update'
+        } else {
+            $updateAction = 'NoChanges'
+        }
+    }
+    else {
         $action = 'Correlate'
     }
 
@@ -174,101 +152,174 @@ try {
             })
     }
 
+    # Get all roles and group by key
+    $splatWebRequest = @{
+        Uri     = "$($c.BaseUrl)/roles"
+        Headers = $headers
+        Method  = 'GET'
+    }
+    $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
+    $roleListGrouped = $roleList | Group-Object -Property Key -AsHashTable -AsString
+
     # Process
     if (-not($dryRun -eq $true)) {
         switch ($action) {
             'Create' {
                 Write-Verbose 'Creating OutSystems account'
-                if ($account.Role) {
-                    $roleObject = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
-                    Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"    
-                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
-                    $account.psobject.Properties.Remove("Role")
-                }
 
+                # Set default role
+                if($null -eq $c.defaultRole){
+                    throw "No default role is configured. Please configure this, as a role is required in OutSystems"
+                }
+                $roleObject = $roleList.Where( { $_.name -eq $c.defaultRole })
+
+                if ($null -eq $roleObject) {
+                    throw "Unable to find a Role with name: $($c.defaultRole)"
+                }
+                $auditLogs.Add([PSCustomObject]@{
+                    Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
+                })
+
+                Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"    
+                $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
+                
+                $body = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
                 $splatWebRequest = @{
-                    Uri     = "$($config.BaseUrl)/users"
+                    Uri     = "$($c.BaseUrl)/users"
                     Headers = $headers
                     Method  = 'POST'
-                    Body    = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
+                    Body    = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
                 }
                 $createdUser = Invoke-RestMethod @splatWebRequest -Verbose:$false
-                $accountReference = $createdUser.key
+                $aRef = [PSCustomObject]@{
+                    id       = $createdUser.key
+                    username = $createdUser.username
+                }
+                $roleName = $roleListGrouped["$($createdUser.RoleKey)"].Name
 
                 # The API does not supports creating disabled accounts
                 if ($account.IsActive -eq $false) {
                     Write-Verbose "Disabling OutSystems account"
+                    $body = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
                     $splatWebRequest = @{
-                        Uri     = "$($config.BaseUrl)/users/$accountReference"
+                        Uri     = "$($c.BaseUrl)/users/$($createdUser.key)"
                         Headers = $headers
                         Method  = 'PUT'
-                        Body    = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
+                        Body    = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
                     }
                     $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
                 }
 
                 # # Only required when Azure Authentication is not enabled in Outsystems
-                Write-Verbose 'Set Password OutSystems account'
-                $splatWebRequest = @{
-                    Uri     = "$($config.BaseUrl)/users/$accountReference/setpassword"
-                    Headers = $headers
-                    Method  = 'POST'
-                    Body    = (@{password = $account.Password } | ConvertTo-Json)
-                }
-                $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
+                # Write-Verbose 'Set Password OutSystems account'
+                # $body = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
+                # $splatWebRequest = @{
+                #     Uri     = "$($c.BaseUrl)/users/$($createdUser.key)/setpassword"
+                #     Headers = $headers
+                #     Method  = 'POST'
+                #     Body    = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
+                # }
+                # $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
                 break
             }
 
             'Update-Correlate' {
                 Write-Verbose 'Updating and correlating OutSystems account'
-                if ([string]::IsNullOrEmpty($responseUser.key)) {
-                    throw "The user account [$($responseUser.Username) exists in Outsystem, but does not have a unique identifier [Key]"
+                if ([string]::IsNullOrEmpty($CurrentUser.key)) {
+                    throw "The user account [$($CurrentUser.Username) exists in Outsystem, but does not have a unique identifier [Key]"
                 }
-                if ($account.Role) {
-                    $roleObject = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
-                    Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"
-                    $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
+
+                switch ($updateAction) {
+                    'Update' {
+                        foreach ($property in ($propertiesChanged.where({$_.name -ne 'Role' }))) {
+                            $CurrentUser.$($property.name) = $property.value
+                        }
+
+                        $body = ($CurrentUser | ConvertTo-Json)
+                        Write-Verbose "Updating OutSystems account $($aref.username) ($($aRef.id))"
+                        Write-Verbose "Body: $body"
+                        $splatWebRequest = @{
+                            Uri     = "$($c.BaseUrl)/users/$($CurrentUser.key)"
+                            Headers = $headers
+                            Method  = 'PUT'
+                            Body    = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
+                        }
+                        $updatedUser = Invoke-RestMethod @splatWebRequest -Verbose:$false
+                        $aRef = [PSCustomObject]@{
+                            id       = $updatedUser.key
+                            username = $updatedUser.username
+                        }
+                        $roleName = $roleListGrouped["$($updatedUser.RoleKey)"].Name
+
+                        $auditLogs.Add([PSCustomObject]@{
+                                Action = "UpdateAccount"
+                                Message = "Update account was successful"
+                                IsError = $false
+                            })
+                        break
+                    }
+                    'NoChanges' {
+                        $aRef = [PSCustomObject]@{
+                            id       = $CurrentUser.key
+                            username = $CurrentUser.username
+                        }
+                        $roleName = $roleListGrouped["$($CurrentUser.RoleKey)"].Name
+
+                        Write-Verbose "No changes to OutSystems account $($CurrentUser.username) ($($CurrentUser.key))"
+                        $auditLogs.Add([PSCustomObject]@{
+                                Action = "UpdateAccount"
+                                Message = "Update was successful (No Changes needed)"
+                                IsError = $false
+                            })
+                        break
+                    }
                 }
-                $accountReference = $responseUser.key
-                $splatWebRequest = @{
-                    Uri     = "$($config.BaseUrl)/users/$($responseUser.key)"
-                    Headers = $headers
-                    Method  = 'PUT'
-                    Body    = ($account | Select-Object * -ExcludeProperty password | ConvertTo-Json)
-                }
-                $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
                 break
             }
 
             'Correlate' {
                 Write-Verbose 'Correlating OutSystems account'
-                if ([string]::IsNullOrEmpty($responseUser.key)) {
-                    throw "The user account [$($responseUser.Username) exists in Outsystem, but does not have a unique identifier [Key]"
+                if ([string]::IsNullOrEmpty($CurrentUser.key)) {
+                    throw "The user account [$($CurrentUser.Username) exists in Outsystem, but does not have a unique identifier [Key]"
                 }
-                $accountReference = $responseUser.key
+                $aRef = [PSCustomObject]@{
+                    id       = $CurrentUser.key
+                    username = $CurrentUser.username
+                }
+                $roleName = $roleListGrouped["$($CurrentUser.RoleKey)"].Name
                 break
             }
         }
         $success = $true
         $auditLogs.Add([PSCustomObject]@{
                 Action  = "CreateAccount"
-                Message = "$action account was successful. Username is: [$($account.UserName)]. AccountReference is: [$accountReference]"
+                Message = "$action account was successful. Username is: [$($account.UserName)]. AccountReference is: [$aRef]"
                 IsError = $false
             })
     }
-} catch {
+}
+catch {
     $errorMessage = "Could not $action OutSystems account. Error: $($_.Exception.Message), $($_.ErrorDetails.Message)"
     Write-Verbose $errorMessage
     $auditLogs.Add([PSCustomObject]@{
             Message = $errorMessage
             IsError = $true
         })
-} finally {
+}
+finally {
     $result = [PSCustomObject]@{
         Success          = $success
-        AccountReference = $accountReference
+        AccountReference = $aRef
         Auditlogs        = $auditLogs
         Account          = ( $account | Select-Object * -ExcludeProperty Password)
+ 
+        # Optionally return data for use in other systems
+        ExportData       = [PSCustomObject]@{
+            id          = $aRef.id;
+            username    = $aRef.username;
+            role        = $roleName;
+        }; 
     }
+
     Write-Output $result | ConvertTo-Json -Depth 10
 }

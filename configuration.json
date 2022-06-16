@@ -1,62 +1,42 @@
 [
-    {
-      "key": "BaseUrl",
-      "type": "input",
-      "defaultValue": "",
-      "templateOptions": {
-        "label": "BaseUrl",
-        "description": "The URL to the API.",
-        "required": true
-      }
-    },
-    {
-      "key": "token",
-      "type": "input",
-      "defaultValue": "",
-      "templateOptions": {
-        "type": "password",
-        "label": "token",
-        "required": true
-      }
-    },
-    {
-      "key": "IsDebug",
-      "type": "checkbox",
-      "defaultValue": true,
-      "templateOptions": {
-        "label": "Toggle debug logging",
-        "description": "When toggled, debug logging will be displayed",
-        "required": false
-      }
-    },
-    {
-      "key": "role.administrator",
-      "type": "input",
-      "defaultValue": "Administrator,Admin",
-      "templateOptions": {
-        "label": "Role Administrator",
-        "description": "Comma seperated Title.Code-Department.Code to map the Role",
-        "required": true
-      }
-    },
-    {
-      "key": "role.developer",
-      "type": "input",
-      "defaultValue": "Ontwikkelaar,Developer",
-      "templateOptions": {
-        "label": "Role Developer",
-        "description": "Comma seperated Title.Code-Department.Code to map the Role",
-        "required": true
-      }
-    },
-    {
-      "key": "role.ops-apps",
-      "type": "input",
-      "defaultValue": "Devops,Security",
-      "templateOptions": {
-        "label": "Role Ops-Apps",
-        "description": "Comma seperated Title.Code-Department.Code to map the Role",
-        "required": true
-      }
+  {
+    "key": "BaseUrl",
+    "type": "input",
+    "defaultValue": "",
+    "templateOptions": {
+      "label": "BaseUrl",
+      "description": "The URL to the API.",
+      "required": true
     }
-  ]
+  },
+  {
+    "key": "token",
+    "type": "input",
+    "defaultValue": "",
+    "templateOptions": {
+      "type": "password",
+      "label": "token",
+      "required": true
+    }
+  },
+  {
+    "key": "IsDebug",
+    "type": "checkbox",
+    "defaultValue": true,
+    "templateOptions": {
+      "label": "Toggle debug logging",
+      "description": "When toggled, debug logging will be displayed",
+      "required": false
+    }
+  },
+  {
+    "key": "defaultRole",
+    "type": "input",
+    "defaultValue": "Default User",
+    "templateOptions": {
+      "label": "Default Role",
+      "description": "The default Role to assign users (a role is required). This role can be overwritten from the permissions configured in the Business Rules",
+      "required": true
+    }
+  }
+]

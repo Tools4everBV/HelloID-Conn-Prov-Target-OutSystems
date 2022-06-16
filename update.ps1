@@ -4,7 +4,7 @@
 # Version: 1.0.0
 #####################################################
 # Initialize default values
-$config = $configuration | ConvertFrom-Json
+$c = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
 $pp = $previousPerson | ConvertFrom-Json
 $aRef = $AccountReference | ConvertFrom-Json
@@ -15,42 +15,44 @@ $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 # Set debug logging
-switch ($($config.IsDebug)) {
+switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
 
 # Account mapping
 $account = [PSCustomObject]@{
-    UserName = $p.Accounts.MicrosoftAzureADVCZC.UserPrincipalName
-    Name     = $p.Accounts.MicrosoftAzureADVCZC.DisplayName # $p.DisplayName
-    Email    = $p.Accounts.MicrosoftAzureAD.mail
-    Role     = "$($p.PrimaryContract.Title.Code)-$($p.PrimaryContract.Department.ExternalId)"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
+    UserName = $p.Accounts.MicrosoftActiveDirectory.UserPrincipalName
+    Name     = $p.Accounts.MicrosoftActiveDirectory.DisplayName # $p.DisplayName
+    Email    = $p.Accounts.MicrosoftActiveDirectory.mail
 }
 
 $previousAccount = [PSCustomObject]@{
-    UserName = $pp.Accounts.MicrosoftAzureADVCZC.UserPrincipalName
-    Name     = $pp.Accounts.MicrosoftAzureADVCZC.DisplayName # $p.DisplayName
-    Email    = $pp.Accounts.MicrosoftAzureAD.mail
-    Role     = "" # Is defined later in the script, since this will be queried from the current data in OutSystems
+    UserName = $pp.Accounts.MicrosoftActiveDirectory.UserPrincipalName
+    Name     = $pp.Accounts.MicrosoftActiveDirectory.DisplayName # $p.DisplayName
+    Email    = $pp.Accounts.MicrosoftActiveDirectory.mail
 }
+# Write-Warning ($pp | ConvertTo-Json)
+# Write-Warning ($previousAccount | ConvertTo-Json)
+# Write-Warning ($account | ConvertTo-Json)
 
 # Troubleshooting
-# $aRef = "12345678-bf9b-4e2f-9cbc-abcdefghij"
+# $aRef = @{
+#     Username = "TestHelloID@enyoi.onmicrosoft.com"
+#     id = "12345678-bf9b-4e2f-9cbc-abcdefghij"
+# }
 # $account = [PSCustomObject]@{
 #     UserName = "TestHelloID@enyoi.onmicrosoft.com"
 #     Name     = "Test HelloID"
 #     Email    = "TestHelloID@enyoi.onmicrosoft.com"
-#     Role     = "Ontwikkelaar"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
 # }
 
 # $previousAccount = [PSCustomObject]@{
 #     UserName = "TestHelloID@enyoi.onmicrosoft.com"
 #     Name     = "Test HelloID"
 #     Email    = "TestHelloID@enyoi.onmicrosoft.com"
-#     Role     = "Administrator"  # This value is used to map title to a Outsystems Role, Which is required for creating a account
 # }
-$dryRun = $false
+# $dryRun = $false
 
 #region functions
 function Resolve-HTTPError {
@@ -96,66 +98,23 @@ function New-AuthorizationHeaders {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
-
-function Invoke-CalculateDesiredRole {
-    <#
-    .DESCRIPTION
-        Finds the role which mapped in the configuration and performs a lookup in Outsystems to retrieve the GUID/Key
-    #>
-    [CmdletBinding()]
-    param (
-        [parameter(Mandatory)]
-        $ScriptConfig,
-
-        [parameter()]
-        $MappedRole
-    )
-    try {
-        foreach ($role in $ScriptConfig.role.PSObject.Properties) {
-            if ($mappedRole -in ($role.Value -split ',' )) {
-                $splatWebRequest = @{
-                    Uri     = "$($ScriptConfig.BaseUrl)/roles"
-                    Headers = $headers
-                    Method  = 'GET'
-                }
-                $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
-                $roleFound = $roleList.Where( { $_.name -eq $role.name })
-                break
-            }
-        }
-        if ($null -eq $roleFound) {
-            throw "Unable to find a Role with the mapping specified in the configuration, Function [$($mappedRole)] is not specfied"
-        }
-        $auditLogs.Add([PSCustomObject]@{
-                Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
-            })
-        Write-Output $roleFound
-    } catch {
-        $PSCmdlet.ThrowTerminatingError($_)
-    }
-}
 #endregion
 
 try {
-    $headers = New-AuthorizationHeaders -AccessToken $config.Token
+    if ($null -eq $aRef.id) {
+        throw "No Account Reference found in HelloID"
+    }
 
-    # Set RoleKey for previous account object with RoleKey from current user object
-    Write-Verbose 'Retrieve existing account from OutSystems'
+    $headers = New-AuthorizationHeaders -AccessToken $c.Token
+
+    # Get all roles and group by key
     $splatWebRequest = @{
-        Uri     = "$($config.BaseUrl)/users/$aref"
+        Uri     = "$($c.BaseUrl)/roles"
         Headers = $headers
         Method  = 'GET'
     }
-    $CurrentUser = Invoke-RestMethod @splatWebRequest -Verbose:$false
-
-    $previousAccount.psobject.Properties.Remove("Role")
-    $previousAccount | Add-Member -NotePropertyMembers @{ RoleKey = $CurrentUser.RoleKey }
-
-    # Calculate RoleKey for account object
-    $roleObject = Invoke-CalculateDesiredRole -ScriptConfig $config -MappedRole $account.Role
-    Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"
-    $account.psobject.Properties.Remove("Role")
-    $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
+    $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
+    $roleListGrouped = $roleList | Group-Object -Property Key -AsHashTable -AsString
 
     # Verify if the account must be updated
     $splatCompareProperties = @{
@@ -184,27 +143,36 @@ try {
                     $CurrentUser.$($property.name) = $property.value
                 }
 
-                Write-Verbose "Updating OutSystems account with accountReference: [$aRef]"
-                Write-Verbose "Body: $($CurrentUser | ConvertTo-Json -Depth 10)"
+                $body = ($CurrentUser | ConvertTo-Json)
+                Write-Verbose "Updating OutSystems account $($aref.username) ($($aRef.id))"
+                Write-Verbose "Body: $body"
                 $splatWebRequest = @{
-                    Uri     = "$($config.BaseUrl)/users/$aRef"
+                    Uri     = "$($c.BaseUrl)/users/$aRef.id"
                     Headers = $headers
                     Method  = 'PUT'
-                    Body    = ($CurrentUser | ConvertTo-Json)
+                    Body    = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
                 }
-                $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
+                $updatedUser = Invoke-RestMethod @splatWebRequest -Verbose:$false
+                $aRef = [PSCustomObject]@{
+                    id       = $updatedUser.key
+                    username = $updatedUser.username
+                }
+                $roleName = $roleListGrouped["$($updatedUser.RoleKey)"].Name
+
                 $auditLogs.Add([PSCustomObject]@{
                         Action = "UpdateAccount"
-                        Message = "Update account was successful for account with accountReference: [$aRef]"
+                        Message = "Update account was successful for account $($aref.username) ($($aRef.id))"
                         IsError = $false
                     })
                 break
             }
             'NoChanges' {
-                Write-Verbose "No changes to OutSystems account with accountReference: [$aRef]"
+                Write-Verbose "No changes to OutSystems account $($aref.username) ($($aRef.id))"
+                $roleName = $roleListGrouped["$($CurrentUser.RoleKey)"].Name
+                
                 $auditLogs.Add([PSCustomObject]@{
                         Action = "UpdateAccount"
-                        Message = 'Update was successful (No Changes needed) for account with accountReference: [$aRef]'
+                        Message = "Update was successful (No Changes needed) for account $($aref.username) ($($aRef.id))"
                         IsError = $false
                     })
                 break
@@ -218,15 +186,15 @@ try {
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not update OutSystems account with accountReference: [$($aRef)]. Error: $($errorObj.ErrorMessage)"
+        # $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($errorObj.ErrorMessage)"
         
         $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not update OutSystems account with accountReference: [$($aRef)]. Error: $($errorObjectConverted.Errors)"
+        $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($errorObjectConverted.Errors)"
     } else {
-        $errorMessage = "Could not update OutSystems account with accountReference: [$($aRef)]. Error: $($ex.Exception.Message)"
+        $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($ex.Exception.Message)"
     }
 
-    $verboseErrorMessage = "Could not update OutSystems account with accountReference: [$($aRef)]. Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    $verboseErrorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
     Write-Verbose $verboseErrorMessage
   
     $auditLogs.Add([PSCustomObject]@{
@@ -239,6 +207,13 @@ try {
         Success   = $success
         Account   = $account
         Auditlogs = $auditLogs
-    }
+
+        # Optionally return data for use in other systems
+        ExportData       = [PSCustomObject]@{
+            id          = $aRef.id;
+            username    = $aRef.username;
+            role        = $roleName;
+        }
+    }; 
     Write-Output $result | ConvertTo-Json -Depth 10
 }

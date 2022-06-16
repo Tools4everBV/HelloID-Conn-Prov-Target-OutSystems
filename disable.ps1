@@ -4,7 +4,7 @@
 # Version: 1.0.0
 #####################################################
 # Initialize default values
-$config = $configuration | ConvertFrom-Json
+$c = $configuration | ConvertFrom-Json
 $p = $person | ConvertFrom-Json
 $aRef = $AccountReference | ConvertFrom-Json
 $success = $false
@@ -14,13 +14,16 @@ $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 # Set debug logging
-switch ($($config.IsDebug)) {
+switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
 
 # Troubleshooting
-# $aRef = "12345678-bf9b-4e2f-9cbc-abcdefghij"
+# $aRef = @{
+#     Username = "TestHelloID@enyoi.onmicrosoft.com"
+#     id = "12345678-bf9b-4e2f-9cbc-abcdefghij"
+# }
 # $dryRun = $false
 
 #region functions
@@ -71,6 +74,10 @@ function New-AuthorizationHeaders {
 #endregion
 
 try {
+    if ($null -eq $aRef.id) {
+        throw "No Account Reference found in HelloID"
+    }
+
     # Add an auditMessage showing what will happen during enforcement
     if ($dryRun -eq $true) {
         $auditLogs.Add([PSCustomObject]@{
@@ -78,10 +85,10 @@ try {
             })
     }
 
-    $headers = New-AuthorizationHeaders -AccessToken $config.Token
+    $headers = New-AuthorizationHeaders -AccessToken $c.Token
     Write-Verbose 'Retrieve existing account from OutSystems'
     $splatWebRequest = @{
-        Uri     = "$($config.BaseUrl)/users/$aref"
+        Uri     = "$($c.BaseUrl)/users/$($aRef.id)"
         Headers = $headers
         Method  = 'GET'
     }
@@ -89,14 +96,15 @@ try {
     $CurrentUser.IsActive = $false
 
     if (-not($dryRun -eq $true)) {
-        Write-Verbose "Disabling OutSystems account with accountReference: [$aRef]"
+        Write-Verbose "Disabling OutSystems account $($aRef.username) ($($aRef.id))"
         $splatWebRequest['Method'] = 'PUT'
-        $splatWebRequest['Body'] = ($CurrentUser | ConvertTo-Json)
+        $body = ($CurrentUser | ConvertTo-Json)
+        $splatWebRequest['Body'] = ([System.Text.Encoding]::UTF8.GetBytes($body)) 
         $null = Invoke-RestMethod @splatWebRequest -Verbose:$false
         $success = $true
         $auditLogs.Add([PSCustomObject]@{
                 Action  = "DisableAccount"
-                Message = "Disable account was successful for account with accountReference: [$aRef]"
+                Message = "Disable account was successful for account $($aRef.username) ($($aRef.id))"
                 IsError = $false
             })
     }
@@ -106,15 +114,15 @@ try {
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not disable OutSystems account with accountReference: [$($aRef)]. Error: $($errorObj.ErrorMessage)"
+        # $errorMessage = "Could not disable OutSystems account $($aRef.username) ($($aRef.id)). Error: $($errorObj.ErrorMessage)"
         
         $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not disable OutSystems account with accountReference: [$($aRef)]. Error: $($errorObjectConverted.Errors)"
+        $errorMessage = "Could not disable OutSystems account $($aRef.username) ($($aRef.id)). Error: $($errorObjectConverted.Errors)"
     } else {
-        $errorMessage = "Could not disable OutSystems account with accountReference: [$($aRef)]. Error: $($ex.Exception.Message)"
+        $errorMessage = "Could not disable OutSystems account $($aRef.username) ($($aRef.id)). Error: $($ex.Exception.Message)"
     }
 
-    $verboseErrorMessage = "Could not disable OutSystems account with accountReference: [$($aRef)]. Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    $verboseErrorMessage = "Could not disable OutSystems account $($aRef.username) ($($aRef.id)). Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
     Write-Verbose $verboseErrorMessage
     
     $auditLogs.Add([PSCustomObject]@{
