@@ -27,15 +27,6 @@ $account = [PSCustomObject]@{
     Email    = $p.Accounts.MicrosoftActiveDirectory.mail
 }
 
-$previousAccount = [PSCustomObject]@{
-    UserName = $pp.Accounts.MicrosoftActiveDirectory.UserPrincipalName
-    Name     = $pp.Accounts.MicrosoftActiveDirectory.DisplayName # $p.DisplayName
-    Email    = $pp.Accounts.MicrosoftActiveDirectory.mail
-}
-# Write-Warning ($pp | ConvertTo-Json)
-# Write-Warning ($previousAccount | ConvertTo-Json)
-# Write-Warning ($account | ConvertTo-Json)
-
 # Troubleshooting
 # $aRef = @{
 #     Username = "TestHelloID@enyoi.onmicrosoft.com"
@@ -47,11 +38,6 @@ $previousAccount = [PSCustomObject]@{
 #     Email    = "TestHelloID@enyoi.onmicrosoft.com"
 # }
 
-# $previousAccount = [PSCustomObject]@{
-#     UserName = "TestHelloID@enyoi.onmicrosoft.com"
-#     Name     = "Test HelloID"
-#     Email    = "TestHelloID@enyoi.onmicrosoft.com"
-# }
 # $dryRun = $false
 
 #region functions
@@ -116,9 +102,20 @@ try {
     $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
     $roleListGrouped = $roleList | Group-Object -Property Key -AsHashTable -AsString
 
+    Write-Verbose 'Retrieve Account list from OutSystems'
+    $splatWebRequest = @{
+        Uri     = "$($c.BaseUrl)/users?IncludeInactive=true"
+        Headers = $headers
+        Method  = 'GET'
+    }
+    $userList = Invoke-RestMethod @splatWebRequest -Verbose:$false
+
+    Write-Verbose "Account lookup based on UserName [$($account.UserName)]"
+    $CurrentUser = $userList | Where-Object { $_.Username -eq $account.UserName }
+
     # Verify if the account must be updated
     $splatCompareProperties = @{
-        ReferenceObject  = @($previousAccount.PSObject.Properties)
+        ReferenceObject  = @($CurrentUser.PSObject.Properties)
         DifferenceObject = @($account.PSObject.Properties)
     }
     $propertiesChanged = (Compare-Object @splatCompareProperties -PassThru).Where( { $_.SideIndicator -eq '=>' })
