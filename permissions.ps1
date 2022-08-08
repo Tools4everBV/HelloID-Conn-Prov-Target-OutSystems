@@ -3,13 +3,15 @@ $c = $configuration | ConvertFrom-Json
 # Set TLS to accept TLS, TLS 1.1 and TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
 
+$VerbosePreference = "SilentlyContinue"
+$InformationPreference = "Continue"
+$WarningPreference = "Continue"
+
 # Set debug logging
 switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
-$InformationPreference = "Continue"
-$WarningPreference = "Continue"
 
 #region functions
 function New-AuthorizationHeaders {
@@ -51,22 +53,33 @@ try {
 catch {
     $ex = $PSItem
 
-    $verboseErrorMessage = "Could not retrieve Role list from OutSystems. Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    # Define (general) action message
+    $actionMessage = "Could not retrieve Role list from OutSystems"
+
+    # Define verbose error message, including linenumber and line and full error message
+    $verboseErrorMessage = "$($actionMessage). Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
     Write-Verbose $verboseErrorMessage
 
+    # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not retrieve Role list from OutSystems. Error: $($errorObj.ErrorMessage)"
-        
-        $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not retrieve Role list from OutSystems. Error: $($errorObjectConverted.Errors)"
+        try{
+
+            $errorObject = $ex | ConvertFrom-Json
+            if($null -ne $errorObject) {
+                $auditErrorMessage = $errorObject.Errors
+            }
+        }
+        catch {
+            $auditErrorMessage = "$($ex.Exception.Message)"
+        }
     }
     else {
-        $errorMessage = "Could not retrieve Role list from OutSystems. Error: $($ex.Exception.Message)"
+        $auditErrorMessage = "$($ex.Exception.Message)"
     }
 
-    throw $errorMessage
+    # throw terminating error
+    throw "$($actionMessage). Error: $auditErrorMessage"
 }
 
 foreach ($role in $roleList) {

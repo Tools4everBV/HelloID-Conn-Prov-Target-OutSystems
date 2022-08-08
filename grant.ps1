@@ -14,13 +14,14 @@ $auditLogs = [Collections.Generic.List[PSCustomObject]]::new()
 # Set TLS to accept TLS, TLS 1.1 and TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
 
+$VerbosePreference = "SilentlyContinue"
+$InformationPreference = "Continue"
+$WarningPreference = "Continue"
 # Set debug logging
 switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
-$InformationPreference = "Continue"
-$WarningPreference = "Continue"
 
 # Troubleshooting
 # $aRef = @{
@@ -59,6 +60,15 @@ try {
 
     $headers = New-AuthorizationHeaders -AccessToken $c.Token
 
+    # Get all roles and group by key
+    $splatWebRequest = @{
+        Uri     = "$($c.BaseUrl)/roles"
+        Headers = $headers
+        Method  = 'GET'
+    }
+    $roleList = Invoke-RestMethod @splatWebRequest -Verbose:$false
+    $roleListGrouped = $roleList | Group-Object -Property Key -AsHashTable -AsString
+
     # Set RoleKey for previous account object with RoleKey from current user object
     Write-Verbose "Retrieve existing account from OutSystems with id: $($aRef.id)"
     $splatWebRequest = @{
@@ -84,9 +94,11 @@ try {
         Method  = 'PUT'
         Body    = ([System.Text.Encoding]::UTF8.GetBytes($body))
     }
+    
+
     if ($dryRun -eq $false) {
         $updatedUser = Invoke-RestMethod @splatWebRequest -Verbose:$false
-        $roleName = $roleListGrouped["$($updatedUser.RoleKey)"].Name
+        $roleName = $roleListGrouped["$($updatedUser.RoleKey)"]
 
         Write-Verbose "Successfully granted permission $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id))"
     } else {
@@ -104,28 +116,42 @@ try {
 
 }
 catch {
-    $success = $false
     $ex = $PSItem
+
+    # Define (general) action message
+    $actionMessage = "Could not grant permission $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id))"
+
+    # Define verbose error message, including linenumber and line and full error message
+    $verboseErrorMessage = "$($actionMessage). Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    Write-Verbose $verboseErrorMessage
+
+    # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not grant $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id)). Error: $($errorObj.ErrorMessage)"
-        
-        $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not grant permission $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id)). Error: $($errorObjectConverted.Errors)"
-    } else {
-        $errorMessage = "Could not grant $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id)). Error: $($ex.Exception.Message)"
+        try{
+
+            $errorObject = $ex | ConvertFrom-Json
+            if($null -ne $errorObject) {
+                $auditErrorMessage = $errorObject.Errors
+            }
+        }
+        catch {
+            $auditErrorMessage = "$($ex.Exception.Message)"
+        }
+    }
+    else {
+        $auditErrorMessage = "$($ex.Exception.Message)"
     }
 
-    $verboseErrorMessage = "Could not grant $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id)). Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
-    Write-Verbose $verboseErrorMessage
-  
+    # Log error to HelloID
+    $success = $false
     $auditLogs.Add([PSCustomObject]@{
             Action = "GrantPermission"
-            Message = $errorMessage
+            Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
 }
+
 
 #build up result
 $result = [PSCustomObject]@{ 
