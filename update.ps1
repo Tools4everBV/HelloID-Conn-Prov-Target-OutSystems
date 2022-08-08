@@ -27,7 +27,6 @@ $account = [PSCustomObject]@{
     Email    = $p.Accounts.MicrosoftActiveDirectory.mail
 }
 
-
 # Troubleshooting
 # $aRef = @{
 #     Username = "TestHelloID@enyoi.onmicrosoft.com"
