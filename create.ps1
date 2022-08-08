@@ -9,8 +9,12 @@ $p = $person | ConvertFrom-Json
 $success = $false
 $auditLogs = [System.Collections.Generic.List[PSCustomObject]]::new()
 
-# Enable TLS1.2
-[System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
+# Set TLS to accept TLS, TLS 1.1 and TLS 1.2
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
+
+$VerbosePreference = "SilentlyContinue"
+$InformationPreference = "Continue"
+$WarningPreference = "Continue"
 
 # Set debug logging
 switch ($($c.IsDebug)) {
@@ -137,7 +141,8 @@ try {
         if ($propertiesChanged) {
             Write-Verbose "Account property(s) required to update: [$($propertiesChanged.name -join ",")]"
             $updateAction = 'Update'
-        } else {
+        }
+        else {
             $updateAction = 'NoChanges'
         }
     }
@@ -168,7 +173,7 @@ try {
                 Write-Verbose 'Creating OutSystems account'
 
                 # Set default role
-                if($null -eq $c.defaultRole){
+                if ($null -eq $c.defaultRole) {
                     throw "No default role is configured. Please configure this, as a role is required in OutSystems"
                 }
                 $roleObject = $roleList.Where( { $_.name -eq $c.defaultRole })
@@ -177,8 +182,8 @@ try {
                     throw "Unable to find a Role with name: $($c.defaultRole)"
                 }
                 $auditLogs.Add([PSCustomObject]@{
-                    Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
-                })
+                        Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
+                    })
 
                 Write-Verbose "Setting role to: $($roleObject.name) ($($roleObject.Key))"    
                 $account | Add-Member -NotePropertyMembers @{ RoleKey = $roleObject.Key }
@@ -231,7 +236,7 @@ try {
 
                 switch ($updateAction) {
                     'Update' {
-                        foreach ($property in ($propertiesChanged.where({$_.name -ne 'Role' }))) {
+                        foreach ($property in ($propertiesChanged.where({ $_.name -ne 'Role' }))) {
                             $CurrentUser.$($property.name) = $property.value
                         }
 
@@ -252,7 +257,7 @@ try {
                         $roleName = $roleListGrouped["$($updatedUser.RoleKey)"].Name
 
                         $auditLogs.Add([PSCustomObject]@{
-                                Action = "UpdateAccount"
+                                Action  = "UpdateAccount"
                                 Message = "Update account was successful"
                                 IsError = $false
                             })
@@ -267,7 +272,7 @@ try {
 
                         Write-Verbose "No changes to OutSystems account $($CurrentUser.username) ($($CurrentUser.key))"
                         $auditLogs.Add([PSCustomObject]@{
-                                Action = "UpdateAccount"
+                                Action  = "UpdateAccount"
                                 Message = "Update was successful (No Changes needed)"
                                 IsError = $false
                             })
@@ -299,10 +304,38 @@ try {
     }
 }
 catch {
-    $errorMessage = "Could not $action OutSystems account. Error: $($_.Exception.Message), $($_.ErrorDetails.Message)"
-    Write-Verbose $errorMessage
+    $ex = $PSItem
+
+    # Define (general) action message
+    $actionMessage = "Could not $action OutSystems account"
+
+    # Define verbose error message, including linenumber and line and full error message
+    $verboseErrorMessage = "$($actionMessage). Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    Write-Verbose $verboseErrorMessage
+
+    # Define audit message, consisting of actual error only
+    if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
+        $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
+        try{
+
+            $errorObject = $ex | ConvertFrom-Json
+            if($null -ne $errorObject) {
+                $auditErrorMessage = $errorObject.Errors
+            }
+        }
+        catch {
+            $auditErrorMessage = "$($ex.Exception.Message)"
+        }
+    }
+    else {
+        $auditErrorMessage = "$($ex.Exception.Message)"
+    }
+
+    # Log error to HelloID
+    $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Message = $errorMessage
+            Action = "CreateAccount"
+            Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
 }
@@ -315,9 +348,9 @@ finally {
  
         # Optionally return data for use in other systems
         ExportData       = [PSCustomObject]@{
-            id          = $aRef.id;
-            username    = $aRef.username;
-            role        = $roleName;
+            id       = $aRef.id;
+            username = $aRef.username;
+            role     = $roleName;
         }; 
     }
 
