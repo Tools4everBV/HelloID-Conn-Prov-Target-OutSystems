@@ -317,7 +317,6 @@ catch {
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         try{
-
             $errorObject = $ex | ConvertFrom-Json
             if($null -ne $errorObject) {
                 $auditErrorMessage = $errorObject.Errors
