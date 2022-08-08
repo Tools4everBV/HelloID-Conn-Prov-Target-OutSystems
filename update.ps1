@@ -212,7 +212,7 @@ catch {
     # Log error to HelloID
     $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action  = "DisableAccount"
+            Action  = "UpdateAccount"
             Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
