@@ -14,13 +14,15 @@ $auditLogs = [Collections.Generic.List[PSCustomObject]]::new()
 # Set TLS to accept TLS, TLS 1.1 and TLS 1.2
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls12
 
+$VerbosePreference = "SilentlyContinue"
+$InformationPreference = "Continue"
+$WarningPreference = "Continue"
+
 # Set debug logging
 switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
     $false { $VerbosePreference = 'SilentlyContinue' }
 }
-$InformationPreference = "Continue"
-$WarningPreference = "Continue"
 
 # Troubleshooting
 # $aRef = @{
@@ -82,7 +84,7 @@ try {
     $roleListGrouped = $roleList | Group-Object -Property Key -AsHashTable -AsString
 
     # Overwrite role with default role
-    if($null -eq $c.defaultRole){
+    if ($null -eq $c.defaultRole) {
         throw "No default role is configured. Please configure this, as a role is required in OutSystems"
     }
     $roleObject = $roleList.Where( { $_.name -eq $c.defaultRole })
@@ -91,8 +93,8 @@ try {
         throw "Unable to find a Role with name: $($c.defaultRole)"
     }
     $auditLogs.Add([PSCustomObject]@{
-        Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
-    })  
+            Message = "Role for Outsystems Account will be set to: $($roleFound.name) ($($roleFound.Key))"
+        })  
 
     $CurrentUser.RoleKey = $roleObject.Key 
 
@@ -112,7 +114,8 @@ try {
         $roleName = $roleListGrouped["$($updatedUser.RoleKey)"].Name
         
         Write-Verbose "Successfully reverted to default role $($roleObject.name) ($($roleObject.Key)) for $($aRef.username) ($($aRef.id))"
-    } else {
+    }
+    else {
         # Dry run logging
         Write-Verbose ($splatWebRequest.Uri)
         Write-Verbose ($splatWebRequest.Body)
@@ -127,40 +130,53 @@ try {
 
 }
 catch {
-    $success = $false
     $ex = $PSItem
+
+    # Define (general) action message
+    $actionMessage = "Could not revert to default role $($roleObject.name) ($($roleObject.Key)) for $($aRef.username) ($($aRef.id))"
+
+    # Define verbose error message, including linenumber and line and full error message
+    $verboseErrorMessage = "$($actionMessage). Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    Write-Verbose $verboseErrorMessage
+
+    # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not revoke $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id)). Error: $($errorObj.ErrorMessage)"
-        
-        $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not revert to default role $($roleObject.name) ($($roleObject.Key)) for $($aRef.username) ($($aRef.id)). Error: $($errorObjectConverted.Errors)"
-    } else {
-        $errorMessage = "Could not revert to default role $($roleObject.name) ($($roleObject.Key)) for $($aRef.username) ($($aRef.id)). Error: $($ex.Exception.Message)"
+        try {
+
+            $errorObject = $ex | ConvertFrom-Json
+            if ($null -ne $errorObject) {
+                $auditErrorMessage = $errorObject.Errors
+            }
+        }
+        catch {
+            $auditErrorMessage = "$($ex.Exception.Message)"
+        }
+    }
+    else {
+        $auditErrorMessage = "$($ex.Exception.Message)"
     }
 
-    $verboseErrorMessage = "Could not revert to default role $($roleObject.name) ($($roleObject.Key)) for $($aRef.username) ($($aRef.id)). Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
-    Write-Verbose $verboseErrorMessage
-  
+    # Log error to HelloID
+    $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action = "RevokePermission"
-            Message = $errorMessage
+            Action  = "RevokePermission"
+            Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
 }
 
 #build up result
 $result = [PSCustomObject]@{ 
-    Success   = $success
-    AuditLogs = $auditLogs
-    Account   = $CurrentUser
+    Success    = $success
+    AuditLogs  = $auditLogs
+    Account    = $CurrentUser
     
     # Optionally return data for use in other systems
-    ExportData       = [PSCustomObject]@{
-        id          = $aRef.id;
-        username    = $aRef.username;
-        role        = $roleName;
+    ExportData = [PSCustomObject]@{
+        id       = $aRef.id;
+        username = $aRef.username;
+        role     = $roleName;
     }; 
 };
 

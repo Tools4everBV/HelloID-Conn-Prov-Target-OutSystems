@@ -17,6 +17,7 @@ $auditLogs = [Collections.Generic.List[PSCustomObject]]::new()
 $VerbosePreference = "SilentlyContinue"
 $InformationPreference = "Continue"
 $WarningPreference = "Continue"
+
 # Set debug logging
 switch ($($c.IsDebug)) {
     $true { $VerbosePreference = 'Continue' }
@@ -101,7 +102,8 @@ try {
         $roleName = $roleListGrouped["$($updatedUser.RoleKey)"]
 
         Write-Verbose "Successfully granted permission $($pRef.Name) ($($pRef.id)) to $($aRef.username) ($($aRef.id))"
-    } else {
+    }
+    else {
         # Dry run logging
         Write-Verbose ($splatWebRequest.Uri)
         Write-Verbose ($splatWebRequest.Body)
@@ -128,10 +130,10 @@ catch {
     # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        try{
+        try {
 
             $errorObject = $ex | ConvertFrom-Json
-            if($null -ne $errorObject) {
+            if ($null -ne $errorObject) {
                 $auditErrorMessage = $errorObject.Errors
             }
         }
@@ -146,7 +148,7 @@ catch {
     # Log error to HelloID
     $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action = "GrantPermission"
+            Action  = "GrantPermission"
             Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
@@ -155,15 +157,15 @@ catch {
 
 #build up result
 $result = [PSCustomObject]@{ 
-    Success   = $success
-    AuditLogs = $auditLogs
-    Account   = $CurrentUser
+    Success    = $success
+    AuditLogs  = $auditLogs
+    Account    = $CurrentUser
 
     # Optionally return data for use in other systems
-    ExportData       = [PSCustomObject]@{
-        id          = $aRef.id;
-        username    = $aRef.username;
-        role        = $roleName;
+    ExportData = [PSCustomObject]@{
+        id       = $aRef.id;
+        username = $aRef.username;
+        role     = $roleName;
     }; 
 };
 
