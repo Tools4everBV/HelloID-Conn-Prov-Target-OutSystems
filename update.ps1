@@ -27,6 +27,7 @@ $account = [PSCustomObject]@{
     Email    = $p.Accounts.MicrosoftActiveDirectory.mail
 }
 
+
 # Troubleshooting
 # $aRef = @{
 #     Username = "TestHelloID@enyoi.onmicrosoft.com"
@@ -178,25 +179,38 @@ try {
         $success = $true
     }
 } catch {
-    $success = $false
     $ex = $PSItem
+
+    # Define (general) action message
+    $actionMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id))"
+
+    # Define verbose error message, including linenumber and line and full error message
+    $verboseErrorMessage = "$($actionMessage). Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
+    Write-Verbose $verboseErrorMessage
+
+    # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        # $errorObj = Resolve-HTTPError -ErrorObject $ex
-        # $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($errorObj.ErrorMessage)"
-        
-        $errorObjectConverted = $_ | ConvertFrom-Json
-        $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($errorObjectConverted.Errors)"
-    } else {
-        $errorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error: $($ex.Exception.Message)"
+        try{
+
+            $errorObject = $ex | ConvertFrom-Json
+            if($null -ne $errorObject) {
+                $auditErrorMessage = $errorObject.Errors
+            }
+        }
+        catch {
+            $auditErrorMessage = "$($ex.Exception.Message)"
+        }
+    }
+    else {
+        $auditErrorMessage = "$($ex.Exception.Message)"
     }
 
-    $verboseErrorMessage = "Could not update OutSystems account $($aref.username) ($($aRef.id)). Error at Line '$($_.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error message: $($ex)"
-    Write-Verbose $verboseErrorMessage
-  
+    # Log error to HelloID
+    $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action = "UpdateAccount"
-            Message = $errorMessage
+            Action = "DisableAccount"
+            Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
 } finally {
