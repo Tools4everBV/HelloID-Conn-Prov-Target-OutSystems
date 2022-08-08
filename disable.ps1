@@ -49,7 +49,8 @@ function Resolve-HTTPError {
         }
         if ($ErrorObject.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') {
             $httpErrorObj.ErrorMessage = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             $httpErrorObj.ErrorMessage = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
         }
         Write-Output $httpErrorObj
@@ -71,7 +72,8 @@ function New-AuthorizationHeaders {
         $headers.Add('Accept', 'application/json')
         $headers.Add('Content-Type', 'application/json')
         Write-Output $headers
-    } catch {
+    }
+    catch {
         $PSCmdlet.ThrowTerminatingError($_)
     }
 }
@@ -112,7 +114,8 @@ try {
                 IsError = $false
             })
     }
-} catch {
+}
+catch {
     $ex = $PSItem
 
     # Define (general) action message
@@ -125,10 +128,10 @@ try {
     # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        try{
+        try {
 
             $errorObject = $ex | ConvertFrom-Json
-            if($null -ne $errorObject) {
+            if ($null -ne $errorObject) {
                 $auditErrorMessage = $errorObject.Errors
             }
         }
@@ -143,11 +146,12 @@ try {
     # Log error to HelloID
     $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action = "DisableAccount"
+            Action  = "DisableAccount"
             Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
-} finally {
+}
+finally {
     $result = [PSCustomObject]@{
         Success   = $success
         Auditlogs = $auditLogs

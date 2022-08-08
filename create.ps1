@@ -316,9 +316,9 @@ catch {
     # Define audit message, consisting of actual error only
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
-        try{
+        try {
             $errorObject = $ex | ConvertFrom-Json
-            if($null -ne $errorObject) {
+            if ($null -ne $errorObject) {
                 $auditErrorMessage = $errorObject.Errors
             }
         }
@@ -333,7 +333,7 @@ catch {
     # Log error to HelloID
     $success = $false
     $auditLogs.Add([PSCustomObject]@{
-            Action = "CreateAccount"
+            Action  = "CreateAccount"
             Message = "$($actionMessage). Error: $auditErrorMessage"
             IsError = $true
         })
