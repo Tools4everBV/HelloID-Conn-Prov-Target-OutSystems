@@ -37,7 +37,7 @@ _HelloID-Conn-Prov-Target-OutSystems_ is a _target_ connector. OutSystems provid
 Therefore the roles cannot managed with the business rule in HelloId. The business rule or mapping are added in the connector configuration. *(See Mapping)*
 
 | Action     | Action(s) Performed  | Comment   | 
-| ------------ | ----------- |
+| ------------ | ----------- | ----------- |
 | Create.ps1        | Create + Set default role \| Correlate \| Correlate + Update   |
 | Update.ps1        | Update \| Nochanges |
 | Enable.ps1        |Isactive = $true    |
